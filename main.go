@@ -16,44 +16,21 @@ type result struct {
 	value    string
 }
 
-func main() {
-	resultC := make(chan result)
+func GetResult(limit int) []result {
+	inC := make(chan result)
 
 	g, ctx := errgroup.WithContext(context.Background())
 
 	names := getFileNames()
-	for _, n := range names {
-		processor := processValue(n, resultC, ctx)
-		g.Go(processor)
-	}
 
-	go func() {
-		if err := g.Wait(); err != nil {
-			if err.Error() != "success" {
-				panic(err)
-			}
-		}
-	}()
-
-	results := processResult(resultC)
-
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].fileName < results[j].fileName
+	g.Go(func() error {
+		return producer(ctx, names, inC)
 	})
-	fmt.Println(results)
-}
 
-func GetResult() []result {
-	result := make(chan result)
-
-	g, ctx := errgroup.WithContext(context.Background())
-
-	names := getFileNames()
-
-	for _, n := range names {
-		processor := processValue(n, result, ctx)
-		g.Go(processor)
-	}
+	// TODO example of worker,  println as they come
+	// g.Go(func() error {
+	// 	return consumer(ctx, inC)
+	// })
 
 	go func() {
 		if err := g.Wait(); err != nil {
@@ -61,12 +38,84 @@ func GetResult() []result {
 		}
 	}()
 
-	results := processResult(result)
+	// TODO process the results, we will potentially have more than 15 entries
+	// we first sort all of them, then return top 15 elements in results as our solution
+
+	return buildResults(inC, limit)
+}
+
+func buildResults(inC <-chan result, limit int) []result {
+	var results []result
+	for r := range inC {
+		results = append(results, r)
+	}
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].fileName < results[j].fileName
 	})
 
-	return results
+	if limit > len(results) {
+		limit = len(results)
+	}
+	return results[:limit]
+}
+
+func producer(ctx context.Context, names []string, inC chan<- result) error {
+	sg, sctx := errgroup.WithContext(context.Background())
+	from := 0
+	to := 2 // not safe should verify len(names) xd
+	max := len(names)
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			if from == max {
+				if err := sg.Wait(); err != nil {
+					panic(err)
+				}
+				close(inC)
+				return nil
+			} else {
+				for i := from; i < to; i++ {
+					n := names[i]
+					processor := processValue(n, inC, sctx)
+					sg.Go(processor)
+				}
+				from, to = nextStep(from, to, max)
+			}
+		}
+	}
+}
+
+func nextStep(from, to, max int) (int, int) {
+	step := 2
+	nfrom := from + step
+
+	if nfrom > max {
+		nfrom = max
+	}
+
+	nto := to + step
+
+	if nto > max {
+		nto = max
+	}
+
+	return nfrom, nto
+}
+
+func consumer(ctx context.Context, inC <-chan result) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case r, ok := <-inC:
+			if !ok {
+				return nil
+			}
+			fmt.Println(r)
+		}
+	}
 }
 
 func processResult(resultC <-chan result) []result {
