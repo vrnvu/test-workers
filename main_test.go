@@ -20,9 +20,9 @@ func TestPipeline(t *testing.T) {
 		{"5.txt", "a"},
 		{"6.txt", "a"},
 	}
-	numberExecutions := 10
+	numberExecutions := 50
 	for i := 0; i < numberExecutions; i++ {
-		actual := GetResult()
+		actual := GetResult(len(expected))
 
 		if len(actual) != len(expected) {
 			t.Fatalf("invalid len, expected %v, actual %v", expected, actual)
