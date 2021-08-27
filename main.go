@@ -60,7 +60,7 @@ func buildResults(inC <-chan result, limit int) []result {
 }
 
 func producer(ctx context.Context, names []string, inC chan<- result) error {
-	sg, sctx := errgroup.WithContext(context.Background())
+	sg, sctx := errgroup.WithContext(ctx)
 	from := 0
 	to := 2 // not safe should verify len(names) xd
 	max := len(names)
@@ -114,24 +114,6 @@ func consumer(ctx context.Context, inC <-chan result) error {
 				return nil
 			}
 			fmt.Println(r)
-		}
-	}
-}
-
-func processResult(resultC <-chan result) []result {
-	var results []result
-	count := 1
-	for {
-		select {
-		case r, ok := <-resultC:
-			if !ok {
-				return results
-			}
-			if count > 15 {
-				return results
-			}
-			count += 1
-			results = append(results, r)
 		}
 	}
 }
