@@ -3,7 +3,7 @@ package main
 import "testing"
 
 func TestPipeline(t *testing.T) {
-	expected := []result{
+	expected := []Result{
 		{"1.txt", "a"},
 		{"10.txt", "a"},
 		{"11.txt", "a"},
