@@ -31,11 +31,9 @@ func GetResult(limit int) []result {
 	outC := make(chan result)
 	doneC := make(chan bool, 1)
 
-	// coordinator
 	g.Go(func() error {
-		from := 0
-		to := 2 // not safe should verify len(names) xd
-		max := len(names)
+		step := 5
+		from, to, max := 0, step, len(names)
 		for {
 			select {
 			case <-doneC:
@@ -44,63 +42,53 @@ func GetResult(limit int) []result {
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
-				// generate a group of workers
-				// what about this? we starting a new group each batch iteration
-				sg, sctx := errgroup.WithContext(ctx)
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-					if from == max {
-						close(inC)
-						return nil
-					}
-
-					for i := from; i < to; i++ {
-						n := names[i]
-						processor := processValue(n, inC, sctx)
-						sg.Go(processor)
-					}
-
-					if err := sg.Wait(); err != nil {
-						return err
-					}
-
-					from, to = nextStep(from, to, max)
+				if from == max {
+					close(inC)
+					return nil
 				}
 
+				sg, sctx := errgroup.WithContext(ctx)
+
+				for i := from; i < to; i++ {
+					n := names[i]
+					processor := processValue(n, inC, sctx)
+					sg.Go(processor)
+				}
+
+				if err := sg.Wait(); err != nil {
+					return err
+				}
+
+				from, to = nextStep(step, from, to, max)
 			}
+
 		}
 	})
 
 	g.Go(func() error {
-		// blocking inC
 		count := 0
 		toSignal := true
 		for r := range inC {
 			// we send anyway but signal our coordinator that we have already enough good data
+			// we use a toSignal to not block and proceed to send the rest of inC to have them all
 			if toSignal && count >= limit {
 				doneC <- true
 				toSignal = false
 			}
-			// attempt to send result to outC, verify ctx
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			// problem this is a blocking operation, so we need a buffer
 			case outC <- r:
 			}
 
-			// only count after success sent
 			count += 1
 			fmt.Println(count)
 		}
-		// TODO what happens if inC is closed at this point?
 		return nil
 	})
 
-	// we want to block main, we are blocking our coordinator
-	// so we are waiting for the doneC to be completed
+	// we do not want to block main, we are waiting on our coordinator group
+	// if success we close our outC been used in buildResults
 	go func() {
 		if err := g.Wait(); err != nil {
 			panic(err)
@@ -111,10 +99,6 @@ func GetResult(limit int) []result {
 
 	r := buildResults(outC, limit)
 	return r
-}
-
-func spawnWorkers() {
-
 }
 
 func buildResults(resultC <-chan result, limit int) []result {
@@ -132,8 +116,7 @@ func buildResults(resultC <-chan result, limit int) []result {
 	return results[:limit]
 }
 
-func nextStep(from, to, max int) (int, int) {
-	step := 2
+func nextStep(step, from, to, max int) (int, int) {
 	nfrom := from + step
 
 	if nfrom > max {
