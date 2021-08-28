@@ -62,12 +62,11 @@ func GetResult(limit int) []result {
 						sg.Go(processor)
 					}
 
-					from, to = nextStep(from, to, max)
-
 					if err := sg.Wait(); err != nil {
-						panic(err)
+						return err
 					}
 
+					from, to = nextStep(from, to, max)
 				}
 
 			}
@@ -112,6 +111,10 @@ func GetResult(limit int) []result {
 
 	r := buildResults(outC, limit)
 	return r
+}
+
+func spawnWorkers() {
+
 }
 
 func buildResults(resultC <-chan result, limit int) []result {
