@@ -16,37 +16,107 @@ type result struct {
 	value    string
 }
 
+func main() {
+	r := GetResult(15)
+	fmt.Println(r)
+}
+
 func GetResult(limit int) []result {
-	inC := make(chan result)
 
 	g, ctx := errgroup.WithContext(context.Background())
 
 	names := getFileNames()
 
+	inC := make(chan result)
+	outC := make(chan result)
+	doneC := make(chan bool, 1)
+
+	// coordinator
 	g.Go(func() error {
-		return producer(ctx, names, inC)
+		from := 0
+		to := 2 // not safe should verify len(names) xd
+		max := len(names)
+		for {
+			select {
+			case <-doneC:
+				close(inC)
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+				// generate a group of workers
+				// what about this? we starting a new group each batch iteration
+				sg, sctx := errgroup.WithContext(ctx)
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+					if from == max {
+						close(inC)
+						return nil
+					}
+
+					for i := from; i < to; i++ {
+						n := names[i]
+						processor := processValue(n, inC, sctx)
+						sg.Go(processor)
+					}
+
+					from, to = nextStep(from, to, max)
+
+					if err := sg.Wait(); err != nil {
+						panic(err)
+					}
+
+				}
+
+			}
+		}
 	})
 
-	// TODO example of worker,  println as they come
-	// g.Go(func() error {
-	// 	return consumer(ctx, inC)
-	// })
+	g.Go(func() error {
+		// blocking inC
+		count := 0
+		toSignal := true
+		for r := range inC {
+			// we send anyway but signal our coordinator that we have already enough good data
+			if toSignal && count >= limit {
+				doneC <- true
+				toSignal = false
+			}
+			// attempt to send result to outC, verify ctx
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			// problem this is a blocking operation, so we need a buffer
+			case outC <- r:
+			}
 
+			// only count after success sent
+			count += 1
+			fmt.Println(count)
+		}
+		// TODO what happens if inC is closed at this point?
+		return nil
+	})
+
+	// we want to block main, we are blocking our coordinator
+	// so we are waiting for the doneC to be completed
 	go func() {
 		if err := g.Wait(); err != nil {
 			panic(err)
 		}
+		fmt.Println("finished")
+		close(outC)
 	}()
 
-	// TODO process the results, we will potentially have more than 15 entries
-	// we first sort all of them, then return top 15 elements in results as our solution
-
-	return buildResults(inC, limit)
+	r := buildResults(outC, limit)
+	return r
 }
 
-func buildResults(inC <-chan result, limit int) []result {
+func buildResults(resultC <-chan result, limit int) []result {
 	var results []result
-	for r := range inC {
+	for r := range resultC {
 		results = append(results, r)
 	}
 	sort.Slice(results, func(i, j int) bool {
@@ -57,53 +127,6 @@ func buildResults(inC <-chan result, limit int) []result {
 		limit = len(results)
 	}
 	return results[:limit]
-}
-
-func producer(ctx context.Context, names []string, inC chan<- result) error {
-	from := 0
-	to := 2 // not safe should verify len(names) xd
-	max := len(names)
-	for {
-		// what about this? we starting a new group each batch iteration
-		sg, sctx := errgroup.WithContext(ctx)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			if from == max {
-				close(inC)
-				return nil
-			}
-
-			for i := from; i < to; i++ {
-				n := names[i]
-				processor := processValue(n, inC, sctx)
-				sg.Go(processor)
-			}
-
-			from, to = nextStep(from, to, max)
-
-			if err := sg.Wait(); err != nil {
-				panic(err)
-			}
-
-			// old version
-			// if from == max {
-			// 	if err := sg.Wait(); err != nil {
-			// 		panic(err)
-			// 	}
-			// 	close(inC)
-			// 	return nil
-			// } else {
-			// 	for i := from; i < to; i++ {
-			// 		n := names[i]
-			// 		processor := processValue(n, inC, sctx)
-			// 		sg.Go(processor)
-			// 	}
-			// 	from, to = nextStep(from, to, max)
-			// }
-		}
-	}
 }
 
 func nextStep(from, to, max int) (int, int) {
@@ -121,20 +144,6 @@ func nextStep(from, to, max int) (int, int) {
 	}
 
 	return nfrom, nto
-}
-
-func consumer(ctx context.Context, inC <-chan result) error {
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case r, ok := <-inC:
-			if !ok {
-				return nil
-			}
-			fmt.Println(r)
-		}
-	}
 }
 
 func processValue(fileName string, out chan<- result, ctx context.Context) func() error {
