@@ -60,29 +60,48 @@ func buildResults(inC <-chan result, limit int) []result {
 }
 
 func producer(ctx context.Context, names []string, inC chan<- result) error {
-	sg, sctx := errgroup.WithContext(ctx)
 	from := 0
 	to := 2 // not safe should verify len(names) xd
 	max := len(names)
 	for {
+		// what about this? we starting a new group each batch iteration
+		sg, sctx := errgroup.WithContext(ctx)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 			if from == max {
-				if err := sg.Wait(); err != nil {
-					panic(err)
-				}
 				close(inC)
 				return nil
-			} else {
-				for i := from; i < to; i++ {
-					n := names[i]
-					processor := processValue(n, inC, sctx)
-					sg.Go(processor)
-				}
-				from, to = nextStep(from, to, max)
 			}
+
+			for i := from; i < to; i++ {
+				n := names[i]
+				processor := processValue(n, inC, sctx)
+				sg.Go(processor)
+			}
+
+			from, to = nextStep(from, to, max)
+
+			if err := sg.Wait(); err != nil {
+				panic(err)
+			}
+
+			// old version
+			// if from == max {
+			// 	if err := sg.Wait(); err != nil {
+			// 		panic(err)
+			// 	}
+			// 	close(inC)
+			// 	return nil
+			// } else {
+			// 	for i := from; i < to; i++ {
+			// 		n := names[i]
+			// 		processor := processValue(n, inC, sctx)
+			// 		sg.Go(processor)
+			// 	}
+			// 	from, to = nextStep(from, to, max)
+			// }
 		}
 	}
 }
