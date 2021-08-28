@@ -11,7 +11,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-type result struct {
+// Result holds the filename and a value, this value in our example is always a
+type Result struct {
 	fileName string
 	value    string
 }
@@ -21,14 +22,16 @@ func main() {
 	fmt.Println(r)
 }
 
-func GetResult(limit int) []result {
+// GetResult will return the list of files that contain the "a" value inside sorted by the
+// fileName and limited to limit parameter
+func GetResult(limit int) []Result {
 
 	g, ctx := errgroup.WithContext(context.Background())
 
 	names := getFileNames()
 
-	inC := make(chan result)
-	outC := make(chan result)
+	inC := make(chan Result)
+	outC := make(chan Result)
 	doneC := make(chan bool, 1)
 
 	g.Go(func() error {
@@ -51,7 +54,7 @@ func GetResult(limit int) []result {
 
 				for i := from; i < to; i++ {
 					n := names[i]
-					processor := processValue(n, inC, sctx)
+					processor := processValue(sctx, n, inC)
 					sg.Go(processor)
 				}
 
@@ -81,7 +84,7 @@ func GetResult(limit int) []result {
 			case outC <- r:
 			}
 
-			count += 1
+			count++
 			fmt.Println(count)
 		}
 		return nil
@@ -101,8 +104,8 @@ func GetResult(limit int) []result {
 	return r
 }
 
-func buildResults(resultC <-chan result, limit int) []result {
-	var results []result
+func buildResults(resultC <-chan Result, limit int) []Result {
+	var results []Result
 	for r := range resultC {
 		results = append(results, r)
 	}
@@ -132,14 +135,14 @@ func nextStep(step, from, to, max int) (int, int) {
 	return nfrom, nto
 }
 
-func processValue(fileName string, out chan<- result, ctx context.Context) func() error {
+func processValue(ctx context.Context, fileName string, out chan<- Result) func() error {
 	return func() error {
 		v := getValue(fileName)
 		if v != "a" {
 			return nil
 		}
 		select {
-		case out <- result{fileName: fileName, value: v}:
+		case out <- Result{fileName: fileName, value: v}:
 		case <-ctx.Done():
 			return ctx.Err()
 		}
