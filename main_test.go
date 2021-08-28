@@ -20,7 +20,7 @@ func TestPipeline(t *testing.T) {
 		{"5.txt", "a"},
 		{"6.txt", "a"},
 	}
-	numberExecutions := 50
+	numberExecutions := 1000
 	for i := 0; i < numberExecutions; i++ {
 		actual := GetResult(len(expected))
 
